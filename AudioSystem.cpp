@@ -2,9 +2,11 @@
 #include "libs/inc/portaudio.h"
 #include "libs/inc/sndfile.hh"
 
+#include <filesystem>
 #include <iostream>
 #include <queue>
 #include <vector>
+#include <set>
 
 #define MAX_SAMPLE_COUNT 2048
 #define MAX_CLIP_COUNT 2048
@@ -13,12 +15,9 @@ namespace AudioSystem
 
 struct AudioSampleData
 {
-    float *data;
-    uint32_t size;
-
-    AudioSampleData() : data(nullptr), size(0)
-    {
-    }
+    float *data = nullptr;
+    uint32_t size = 0;
+    bool stereo = true;
 
     ~AudioSampleData()
     {
@@ -28,23 +27,14 @@ struct AudioSampleData
 
 struct AudioClipData
 {
-    AudioSampleData *sample;
-    uint32_t position;
-    bool loop;
-    float volume;
-    float pan;
+    AudioSampleData *sample = nullptr;
+    uint32_t position = 0;
+    bool loop = false;
+    float volume = 1.0f;
+    float pan = 0.0f;
     bool paused = false;
     bool complete = false;
 
-    AudioClipData() : sample(nullptr), position(0), loop(false), volume(1.0f), pan(0.0f)
-    {
-    }
-
-    ~AudioClipData()
-    {
-    }
-
-    // TODO: Implement
     float Next()
     {
         if (position > sample->size)
@@ -69,8 +59,13 @@ std::queue<AudioSample> availableSampleIds;
 std::queue<AudioClip> availableClipsIds;
 std::vector<AudioSampleData *> loadedSamples;
 std::vector<AudioClipData *> playingClips;
+// NOTE: this feels like a bit of a hack, but it seems to be the only way to
+// ensure that the clips are correctly freed after they are no longer in use.
+std::set<AudioClipData *> clipsToFree;
+uint32_t clipsInFlight = 0;
 PaStreamParameters outputParameters;
 PaStream *stream;
+std::string error;
 
 static int paCallback(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer,
                       const PaStreamCallbackTimeInfo *timeInfo, PaStreamCallbackFlags statusFlags, void *userData)
@@ -107,14 +102,26 @@ static int paCallback(const void *inputBuffer, void *outputBuffer, unsigned long
             auto &left = *write++;
             auto &right = *write++;
 
+            // Get the next sample from the clip
+            // and enforce mono compatibility
+            float l, r;
+            if (clip->sample->stereo)
+            {
+                l = clip->Next();
+                r = clip->Next();
+            }
+            else
+            {
+                auto value = clip->Next();
+                l = value;
+                r = value;
+            }
+
             // Apply Constant Power Panning
             auto pan = clip->pan;
-            auto l = clip->Next() * (1.0f - pan) * 0.707f;
-            auto r = clip->Next() * (1.0f + pan) * 0.707f;
+            left += (l * (1.0f - pan) * 0.707f);
+            right += (r * (1.0f + pan) * 0.707f);
 
-            // Accumulate the sample into the output buffer
-            left += l;
-            right += r;
             // Clip the output value between -1.0f and 1.0f
             left > 1.0f ? left = 1.0f : left < -1.0f ? left = -1.0f : left;
             right > 1.0f ? right = 1.0f : right < -1.0f ? right = -1.0f : right;
@@ -124,16 +131,16 @@ static int paCallback(const void *inputBuffer, void *outputBuffer, unsigned long
     return paContinue;
 }
 
-void Initialize()
+bool Initialize()
 {
     // Fill the available sample IDs
-    for (uint32_t i = 0; i < MAX_SAMPLE_COUNT; i++)
+    for (uint32_t i = 1; i < MAX_SAMPLE_COUNT; i++)
     {
         availableSampleIds.push(i);
     }
 
     // Fill the available clip IDs
-    for (uint32_t i = 0; i < MAX_CLIP_COUNT; i++)
+    for (uint32_t i = 1; i < MAX_CLIP_COUNT; i++)
     {
         availableClipsIds.push(i);
     }
@@ -148,16 +155,16 @@ void Initialize()
     PaError err = Pa_Initialize();
     if (err != paNoError)
     {
-        std::cout << "Error initializing PortAudio: " << Pa_GetErrorText(err) << std::endl;
-        return;
+        error = "Error initializing PortAudio: " + std::string(Pa_GetErrorText(err));
+        return false;
     }
 
     // Open the default output stream
     outputParameters.device = Pa_GetDefaultOutputDevice();
     if (outputParameters.device == paNoDevice)
     {
-        std::cout << "Error: No default output device." << std::endl;
-        return;
+        error = "Error: No default output device.";
+        return false;
     }
 
     // TODO: Make this configurable
@@ -171,35 +178,46 @@ void Initialize()
     err = Pa_OpenStream(&stream, NULL, &outputParameters, 44100, 256, paClipOff, paCallback, &playingClips);
     if (err != paNoError)
     {
-        std::cout << "Pa_OpenStream() PortAudio Error: " << Pa_GetErrorText(err) << std::endl;
+        error = "Error opening PortAudio stream: " + std::string(Pa_GetErrorText(err));
+        return false;
     }
 
     // Start the stream and begin the audio callback
     err = Pa_StartStream(stream);
     if (err != paNoError)
     {
-        std::cout << "Pa_StartStream() PortAudio Error: " << Pa_GetErrorText(err) << std::endl;
+        error = "Error starting PortAudio stream: " + std::string(Pa_GetErrorText(err));
+        return false;
     }
+
+    return true;
 }
 
-void Terminate()
+bool Terminate()
 {
     // Stop the stream
     PaError err = Pa_StopStream(stream);
     if (err != paNoError)
     {
-        std::cout << "Pa_StopStream() PortAudio Error: " << Pa_GetErrorText(err) << std::endl;
+        error = "Error stopping PortAudio stream: " + std::string(Pa_GetErrorText(err));
+        return false;
     }
 
     // Close the stream
     err = Pa_CloseStream(stream);
     if (err != paNoError)
     {
-        std::cout << "Pa_CloseStream() PortAudio Error: " << Pa_GetErrorText(err) << std::endl;
+        error = "Error closing PortAudio stream: " + std::string(Pa_GetErrorText(err));
+        return false;
     }
 
     // Terminate PortAudio
-    Pa_Terminate();
+    err = Pa_Terminate();
+    if (err != paNoError)
+    {
+        error = "Error terminating PortAudio: " + std::string(Pa_GetErrorText(err));
+        return false;
+    }
 
     // Delete all the playing clips
     for (auto &clip : playingClips)
@@ -207,24 +225,107 @@ void Terminate()
         delete clip;
     }
 
+    // Delete all the waste clips
+    for (auto &clip : clipsToFree)
+    {
+        delete clip;
+    }
+    clipsToFree.clear();
+
     // Delete all the loaded samples
     for (auto &sample : loadedSamples)
     {
         delete sample;
     }
+
+    return true;
+}
+
+void Reset()
+{
+    // Stop all the playing clips
+    for (int i = 1; i < MAX_CLIP_COUNT; i++)
+    {
+        if (playingClips[i] != nullptr)
+        {
+            Stop(i);
+        }
+    }
+
+    // Delete all the waste clips
+    for (auto &clip : clipsToFree)
+    {
+        delete clip;
+    }
+    clipsToFree.clear();
+    
+    // Free all the loaded samples
+    for (int i = 1; i < MAX_SAMPLE_COUNT; i++)
+    {
+        if (loadedSamples[i] != nullptr)
+        {
+            Free(i);
+        }
+    }
+}
+
+const std::string &GetError()
+{
+    return error;
 }
 
 AudioSample Load(const std::string &path)
 {
-    std::cout << "Loading audio file: " << path << std::endl;
+    // Ensure the path is valid
+    if (!std::filesystem::exists(path))
+    {
+        error = "Error loading sample '" + path + "': File does not exist.";
+        return 0;
+    }
 
+    // Ensure the path is a file
+    if (!std::filesystem::is_regular_file(path))
+    {
+        error = "Error loading sample '" + path + "': Path is not a file.";
+        return 0;
+    }
+
+    // Load the sample
     SndfileHandle file = SndfileHandle(path.c_str());
+
+    // Ensure the sample was loaded successfully
+    if (file.error())
+    {
+        error = "Error loading sample '" + path + "': " + file.strError();
+        return 0;
+    }
+
+    // Ensure the sample is mono or stereo
+    if (file.channels() != 1 && file.channels() != 2)
+    {
+        error = "Error loading sample '" + path + "': Sample must be mono or stereo.";
+        return 0;
+    }
+
+    // Ensure the sample is 32-bit float
+    // if (file.format() != SF_FORMAT_FLOAT)
+    // {
+    //     error = "Error loading sample '" + path + "': Sample must be 32-bit float.";
+    //     return 0;
+    // }
+
+    // Ensure the sample is 44100 Hz
+    if (file.samplerate() != 44100)
+    {
+        error = "Error loading sample '" + path + "': Sample must be 44100 Hz.";
+        return 0;
+    }
+
+    // Read the sample data into an AudioSampleData struct
     AudioSampleData *sample = new AudioSampleData();
     sample->data = new float[file.frames() * file.channels()];
     sample->size = file.frames() * file.channels();
     file.read(sample->data, sample->size);
-
-    std::cout << "Loaded audio file: " << path << std::endl;
 
     // Allocate a new sample ID
     auto sampleId = availableSampleIds.front();
@@ -257,6 +358,20 @@ void Free(AudioSample sample)
 
 AudioClip Clip(AudioSample sample)
 {
+    // Ensure the sample is valid
+    if (sample == 0)
+    {
+        error = "Error clipping sample: Invalid sample ID.";
+        return 0;
+    }
+
+    // Ensure the sample has been loaded
+    if (loadedSamples[sample] == nullptr)
+    {
+        error = "Error clipping sample: Sample has not been loaded.";
+        return 0;
+    }
+
     // Allocate a new clip
     auto clipId = availableClipsIds.front();
     availableClipsIds.pop();
@@ -275,15 +390,24 @@ AudioClip Clip(AudioSample sample)
 
 void Play(AudioClip clip)
 {
+    // Ensure the clip is valid
     if (playingClips[clip] == nullptr)
     {
         return;
     }
-    playingClips[clip]->paused = false;
+
+    // Reset the clip so that it will play from the beginning
+    auto clipData = playingClips[clip];
+    clipData->paused = false;
+    clipData->complete = false;
+    clipData->position = 0;
+
+    clipsInFlight++;
 }
 
 bool IsPlaying(AudioClip clip)
 {
+    // Ensure the clip is valid
     if (playingClips[clip] == nullptr)
     {
         return false;
@@ -291,15 +415,44 @@ bool IsPlaying(AudioClip clip)
     return !playingClips[clip]->complete && !playingClips[clip]->paused;
 }
 
-// Stops the specified clip, and frees it.
+bool Flush()
+{
+    for (int i = 1; i < MAX_CLIP_COUNT; i++)
+    {
+        if (playingClips[i] != nullptr && playingClips[i]->complete)
+        {
+            Stop(i);
+        }
+    }
+
+    for (auto clip : clipsToFree)
+    {
+        delete clip;
+    }
+    clipsToFree.clear();
+
+    return clipsInFlight > 0;
+}
+
 void Stop(AudioClip clip)
 {
+    // Ensure the clip is valid
+    if (playingClips[clip] == nullptr)
+    {
+        return;
+    }
+
     // Free the clip data
-    delete playingClips[clip];
+    // HACK - We can't delete the clip data here because it will be used by the audio thread?
+    // I'm assuming this won't always work, especially if the audio thread is running 
+    // significantly slower than the main thread?
+    clipsToFree.insert(playingClips[clip]);
     playingClips[clip] = nullptr;
 
-    // Add the clip ID to the available queue
+    // Add the clip ID back to the available queue
     availableClipsIds.push(clip);
+
+    clipsInFlight--;
 }
 
 void SetVolume(AudioClip clip, float volume)
@@ -328,5 +481,4 @@ void SetPan(AudioClip clip, float pan)
     }
     playingClips[clip]->pan = pan;
 }
-
 } // namespace AudioSystem

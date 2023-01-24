@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <string>
 
+// A simple jukebox audio player that can load and play audio files.
 namespace AudioSystem
 {
-// A simple jukebox audio player that can load and play audio files.
 
 // Acts as a handle to an audio sample.
 using AudioSample = uint32_t;
@@ -15,10 +15,13 @@ using AudioSample = uint32_t;
 using AudioClip = uint32_t;
 
 // Initializes the audio system, and loads the audio device.
-void Initialize();
+bool Initialize();
 
 // Terminates the audio system, and frees all resources.
-void Terminate();
+bool Terminate();
+
+// Returns the error message from the last failed operation.
+const std::string &GetError();
 
 // Loads an audio sample from the specified path, and returns the sample ID.
 // Returns 0 if the sample could not be loaded.
@@ -35,9 +38,16 @@ void Reset();
 // Returns the clip ID, or 0 if the clip could not be launched.
 AudioClip Clip(AudioSample sample);
 
+// Plays the specified clip.
 void Play(AudioClip clip);
 
+// Returns true if the specified clip is playing
+// Ie not paused, looping or otherwise not stopped.
 bool IsPlaying(AudioClip clip);
+
+// Cleans up any clips that are no longer playing,
+// and returns true if any clips are still playing.
+bool Flush();
 
 // Stops the specified clip, and frees it.
 void Stop(AudioClip clip);
