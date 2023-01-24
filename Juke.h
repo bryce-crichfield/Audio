@@ -4,7 +4,7 @@
 #include <string>
 
 // A simple jukebox audio player that can load and play audio files.
-namespace AudioSystem
+namespace Juke
 {
 
 // Acts as a handle to an audio sample.

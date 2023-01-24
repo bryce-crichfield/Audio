@@ -1,4 +1,4 @@
-#include "AudioSystem.h"
+#include "Juke.h"
 
 #include <chrono>
 #include <iostream>
@@ -6,55 +6,55 @@
 
 int main()
 {
-    auto err = AudioSystem::Initialize();
+    auto err = Juke::Initialize();
     if (!err)
     {
-        std::cout << AudioSystem::GetError() << std::endl;
+        std::cout << Juke::GetError() << std::endl;
         return 1;
     }
 
-    auto s1 = AudioSystem::Load("loop1.wav");
+    auto s1 = Juke::Load("loop1.wav");
     if (!s1)
     {
-        std::cout << AudioSystem::GetError() << std::endl;
+        std::cout << Juke::GetError() << std::endl;
         return 1;
     }
 
-    auto s2 = AudioSystem::Load("loop2.wav");
+    auto s2 = Juke::Load("loop2.wav");
     if (!s2)
     {
-        std::cout << AudioSystem::GetError() << std::endl;
+        std::cout << Juke::GetError() << std::endl;
         return 1;
     }
 
-    auto c1 = AudioSystem::Clip(s1);
-    AudioSystem::SetVolume(c1, 1);
-    AudioSystem::SetPan(c1, 1);
-    AudioSystem::Play(c1);
+    auto c1 = Juke::Clip(s1);
+    Juke::SetVolume(c1, 1);
+    Juke::SetPan(c1, 1);
+    Juke::Play(c1);
 
     if (!c1)
     {
-        std::cout << AudioSystem::GetError() << std::endl;
+        std::cout << Juke::GetError() << std::endl;
         return 1;
     }
 
-    auto c2 = AudioSystem::Clip(s2);
-    AudioSystem::SetVolume(c2, 1);
-    AudioSystem::SetPan(c2, -1);
-    AudioSystem::Play(c2);
+    auto c2 = Juke::Clip(s2);
+    Juke::SetVolume(c2, 1);
+    Juke::SetPan(c2, -1);
+    Juke::Play(c2);
 
-    while (AudioSystem::Flush())
+    while (Juke::Flush())
     {
     }
 
     // Not needed, but good practice
-    AudioSystem::Stop(c1);
-    AudioSystem::Stop(c2);
+    Juke::Stop(c1);
+    Juke::Stop(c2);
 
     // Not needed, but good practice
-    AudioSystem::Free(s1);
-    AudioSystem::Free(s2);
+    Juke::Free(s1);
+    Juke::Free(s2);
 
-    AudioSystem::Terminate();
+    Juke::Terminate();
     return 0;
 }

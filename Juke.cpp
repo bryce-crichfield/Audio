@@ -1,4 +1,4 @@
-#include "AudioSystem.h"
+#include "Juke.h"
 #include "libs/inc/portaudio.h"
 #include "libs/inc/sndfile.hh"
 
@@ -10,7 +10,7 @@
 
 #define MAX_SAMPLE_COUNT 2048
 #define MAX_CLIP_COUNT 2048
-namespace AudioSystem
+namespace Juke
 {
 
 struct AudioSampleData
