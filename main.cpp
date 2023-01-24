@@ -17,16 +17,15 @@ int main()
     if (!s1)
     {
         std::cout << AudioSystem::GetError() << std::endl;
-        // return 1;
+        return 1;
     }
 
     auto s2 = AudioSystem::Load("loop2.wav");
     if (!s2)
     {
         std::cout << AudioSystem::GetError() << std::endl;
-        // return 1;
+        return 1;
     }
-
 
     auto c1 = AudioSystem::Clip(s1);
     AudioSystem::SetVolume(c1, 1);
@@ -48,12 +47,14 @@ int main()
     {
     }
 
+    // Not needed, but good practice
     AudioSystem::Stop(c1);
     AudioSystem::Stop(c2);
 
+    // Not needed, but good practice
     AudioSystem::Free(s1);
     AudioSystem::Free(s2);
-    
+
     AudioSystem::Terminate();
     return 0;
 }
