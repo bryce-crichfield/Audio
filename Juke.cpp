@@ -1,6 +1,6 @@
 #include "Juke.h"
-#include "libs/inc/portaudio.h"
-#include "libs/inc/sndfile.hh"
+#include <portaudio.h>
+#include <sndfile.hh>
 
 #include <filesystem>
 #include <iostream>
