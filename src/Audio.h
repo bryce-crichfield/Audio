@@ -4,6 +4,10 @@
 
 namespace Audio
 {
+// An Id representing an allocated audio sample.  
+using Sample = unsigned int;
+// An Id representing an allocated audio clip.
+using Clip = unsigned int;
 /* -------------------------------------------------------------------------- */
 /*                              System Properites                             */
 /* -------------------------------------------------------------------------- */
@@ -47,9 +51,6 @@ std::string GetErrorString();
 /*                                Audio Samples                               */
 /* -------------------------------------------------------------------------- */
 
-// An Id representing an allocated audio sample.  
-using Sample = unsigned int;
-
 // Create a sample from the given filename. Returns the sample id if successful,
 // 0 otherwise.
 Sample CreateSample(const std::string &filename);
@@ -57,14 +58,13 @@ Sample CreateSample(const std::string &filename);
 // Destroy the given sample, freeing any allocated memory.
 void DestroySample(Sample sample);
 
-void LowpassFilter(Sample sample, float cutoff);
+// Launches a clip for us with the given sample. Returns the clip id if
+// successful, 0 otherwise.
+Clip PlaySample(Sample sample);
 
 /* -------------------------------------------------------------------------- */
 /*                                 Audio Clips                                */
 /* -------------------------------------------------------------------------- */
-
-// An Id representing an allocated audio clip.
-using Clip = unsigned int;
 
 // Create a clip from the given sample. Returns the clip id if successful, 0
 // otherwise.
@@ -80,6 +80,19 @@ void Play(Clip clip);
 // Pause the given clip. 
 void Pause(Clip clip);
 
+// Get the volume of the given clip. The volume will be in the range [0, 1].
+float GetClipVolume(Clip clip);
+
+// Get the pan of the given clip. The pan will be in the range [-1, 1].
+float GetClipPan(Clip clip);
+
+// Get the loop count of the given clip. 
+int GetClipLoop(Clip clip);
+
+// Get the playback position of the given clip. The position will be in the
+// range [0, 1]. 0 is the beginning of the clip, 1 is the end of the clip.
+float GetClipPosition(Clip clip);
+
 // Set the volume of the given clip. The volume should be in the range [0, 1].
 void SetClipVolume(Clip clip, float volume);
 
@@ -90,6 +103,13 @@ void SetClipPan(Clip clip, float pan);
 // upon playback.  It is not guaranteed that the clip will loop the exact
 // number of times specified if the clip is currently playing. 
 void SetClipLoop(Clip clip, int count);
+
+// Sets the playback position of the given clip. The position should be in the
+// range [0, 1]. 0 is the beginning of the clip, 1 is the end of the clip.
+void SetClipPosition(Clip clip, float position);
+
+// Returns true if the given clip is currently playing, false otherwise.
+bool IsClipPlaying(Clip clip);
 
 /* -------------------------------------------------------------------------- */
 }; // namespace Audio

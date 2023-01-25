@@ -14,6 +14,7 @@
 /*               Forward Declarations of Internal Implementation              */
 /* -------------------------------------------------------------------------- */
 namespace Audio {
+
 // Mapped by an Audio::Sample identifier, and represents the data for that id.
 struct SampleData {
     float* data = nullptr;
@@ -37,7 +38,6 @@ enum class ClipState {
     Paused,
     Complete
 };
-
 
 // Mapped by an Audio::Clip identifier, and represents the data for that id.
 struct ClipData {
@@ -98,6 +98,7 @@ int PortAudioCallback(const void* inputBuffer, void* outputBuffer, unsigned long
 GlobalData* gData = nullptr;
 
 } // namespace Audio
+
 /* -------------------------------------------------------------------------- */
 /*                               Implementation                               */
 /* -------------------------------------------------------------------------- */
@@ -118,7 +119,6 @@ void ClipData::IncrementSampleIndex()
     if (sample == nullptr) {
         return;
     }
-
     sampleIndex += 1;
     if (sampleIndex >= sample->length) {
         if (loopCount == 0) {
@@ -168,6 +168,7 @@ inline std::pair<float, float> ClipData::NextStereo()
 void ClipData::Reset()
 {
     sample = nullptr;
+    sampleIndex = 0;
     state = ClipState::Paused;
     volume = 1.0f;
     pan = 0.0f;
@@ -187,18 +188,20 @@ bool Initialize(const Properties& properties)
     gData->properties = properties;
 
     // Initialize Sample ID Pool
-    for (unsigned int i = 0; i < properties.maxSampleCount; ++i) {
+    for (unsigned int i = 1; i < properties.maxSampleCount + 1; ++i) {
         gData->availableSampleIds.push(i);
     }
     // Initialize Clip ID Pool
-    for (unsigned int i = 0; i < properties.maxClipCount; ++i) {
+    for (unsigned int i = 1; i < properties.maxClipCount + 1; ++i) {
         gData->availableClipIds.push(i);
     }
 
     // Initialize Sample Data Pool
-    gData->sampleData.resize(properties.maxSampleCount);
+    // HACK ALERT - The first sample will never be used as Id 0 is invalid.
+    gData->sampleData.resize(properties.maxSampleCount + 1);
     // Initialize Clip Data Pool
-    gData->clipData.resize(properties.maxClipCount);
+    // HACK ALERT - The first clip will never be used as Id 0 is invalid.
+    gData->clipData.resize(properties.maxClipCount + 1);
 
     // Intialize PortAudio, return false if there is an error
     PaError err = Pa_Initialize();
@@ -317,10 +320,11 @@ int PortAudioCallback(const void* inputBuffer, void* outputBuffer, unsigned long
 /* -------------------------------------------------------------------------- */
 void Flush()
 {
+    // HACK - We have to start at 0 because we technically have a clip at index 0
     int i = 0;
     for (auto& clip : gData->clipData) {
         if (clip.state == ClipState::Complete) {
-            clip.Reset();
+            DestroyClip(i);
         }
         i++;
     }
@@ -345,7 +349,6 @@ std::string GetErrorString()
 Sample CreateSample(const std::string& filename)
 {
     LOG_INFO("Loading Sample '" << filename << "'")
-
     // Ensure that there is an available sample ID
     if (gData->availableSampleIds.empty()) {
         gData->errorString = "Error creating sample '" + filename + "': No available sample IDs.";
@@ -413,7 +416,12 @@ Sample CreateSample(const std::string& filename)
 /* -------------------------------------------------------------------------- */
 void DestroySample(Sample sample)
 {
-    LOG_INFO("Destroying sample " << sample << "")
+    // Ensure that the sample is valid
+    if (!sample) {
+        gData->errorString = "Error destroying sample: Invalid sample.";
+        LOG_ERROR("Audio Error: " << gData->errorString)
+        return;
+    }
 
     // Reset the reference sample data in the pool to default values
     SampleData& sampleData = gData->sampleData[sample];
@@ -421,15 +429,45 @@ void DestroySample(Sample sample)
 
     // Add the sample ID back to the pool
     gData->availableSampleIds.push(sample);
-
-    LOG_SUCCESS("Destroyed sample " << sample)
 }
+/* -------------------------------------------------------------------------- */
+Clip PlaySample(Sample sample)
+{
+    // Ensure the sample is valid
+    if (!sample) {
+        gData->errorString = "Error playing sample: Invalid sample.";
+        LOG_ERROR("Audio Error: " << gData->errorString)
+        return 0;
+    }
+
+    // Create a new clip
+    Clip clip = CreateClip(sample);
+    if (!clip) {
+        gData->errorString = "Error playing sample: " + gData->errorString;
+        LOG_ERROR("Audio Error: " << gData->errorString)
+        return 0;
+    }
+
+    // Play the clip
+    Play(clip);
+
+    return clip;
+}
+
 /* -------------------------------------------------------------------------- */
 Clip CreateClip(Sample sample)
 {
+    // Ensure the sample is valid
+    if (!sample) {
+        gData->errorString = "Error creating clip: Invalid sample.";
+        LOG_ERROR("Audio Error: " << gData->errorString)
+        return 0;
+    }
+
     // Ensure that there is an available clip ID
     if (gData->availableClipIds.empty()) {
         gData->errorString = "Error creating clip: No available clip IDs.";
+        LOG_ERROR("Audio Error: " << gData->errorString)
         return 0;
     }
 
@@ -452,6 +490,9 @@ Clip CreateClip(Sample sample)
 /* -------------------------------------------------------------------------- */
 void DestroyClip(Clip clip)
 {
+    // Ensure that the clip is valid
+    if (!clip) return;
+
     // Get the clip data from the pool and reset it to default values
     ClipData& clipData = gData->clipData[clip];
     clipData.Reset();
@@ -462,6 +503,9 @@ void DestroyClip(Clip clip)
 /* -------------------------------------------------------------------------- */
 void Play(Clip clip)
 {
+    // Ensure that the clip is valid
+    if (!clip) return;
+
     // Get the clip data from the pool and set it to playing
     ClipData& clipData = gData->clipData[clip];
     clipData.state = ClipState::Playing;
@@ -469,13 +513,63 @@ void Play(Clip clip)
 /* -------------------------------------------------------------------------- */
 void Pause(Clip clip)
 {
+    // Ensure that the clip is valid
+    if (!clip) return;
+
     // Get the clip data from the pool and set it to paused
     ClipData& clipData = gData->clipData[clip];
     clipData.state = ClipState::Paused;
 }
 /* -------------------------------------------------------------------------- */
+float GetClipVolume(Clip clip)
+{
+    // Ensure that the clip is valid
+    if (!clip) return 0.0f;
+
+    // Get the clip data from the pool and return the volume
+    ClipData& clipData = gData->clipData[clip];
+    return clipData.volume;
+}
+/* -------------------------------------------------------------------------- */
+float GetClipPan(Clip clip)
+{
+    // Ensure that the clip is valid
+    if (!clip) return 0.0f;
+
+    // Get the clip data from the pool and return the pan
+    ClipData& clipData = gData->clipData[clip];
+    return clipData.pan;
+}
+/* -------------------------------------------------------------------------- */
+int GetClipLoop(Clip clip)
+{
+    // Ensure that the clip is valid
+    if (!clip) return 0;
+
+    // Get the clip data from the pool and return the loop
+    ClipData& clipData = gData->clipData[clip];
+    return clipData.loopCount;
+}
+/* -------------------------------------------------------------------------- */
+float GetClipPosition(Clip clip)
+{
+    // Ensure that the clip is valid
+    if (!clip) return 0.0f;
+
+    // Get the clip data from the pool and return the position
+    ClipData& clipData = gData->clipData[clip];
+
+    // Ensure that the clip has an associated sample
+    if (!clipData.sample) return 0.0f;
+
+    return (float)clipData.sampleIndex / clipData.sample->length;
+}
+/* -------------------------------------------------------------------------- */
 void SetClipVolume(Clip clip, float volume)
 {
+    // Ensure that the clip is valid
+    if (!clip) return;
+
     // Get the clip data from the pool and set the volume
     ClipData& clipData = gData->clipData[clip];
     clipData.volume = volume;
@@ -483,6 +577,9 @@ void SetClipVolume(Clip clip, float volume)
 /* -------------------------------------------------------------------------- */
 void SetClipPan(Clip clip, float pan)
 {
+    // Ensure that the clip is valid
+    if (!clip) return;
+
     // Get the clip data from the pool and set the pan
     ClipData& clipData = gData->clipData[clip];
     clipData.pan = pan;
@@ -490,13 +587,36 @@ void SetClipPan(Clip clip, float pan)
 /* -------------------------------------------------------------------------- */
 void SetClipLoop(Clip clip, int count)
 {
+    // Ensure that the clip is valid
+    if (!clip) return;
+
     // Get the clip data from the pool and set the loop count
     ClipData& clipData = gData->clipData[clip];
     clipData.loopCount = count;
 }
 /* -------------------------------------------------------------------------- */
+void SetClipPosition(Clip clip, float position)
+{
+    // Ensure that the clip is valid
+    if (!clip) return;
+
+    // Get the clip data from the pool and set the position
+    ClipData& clipData = gData->clipData[clip];
+
+    // Ensure that the clip has an associated sample
+    if (!clipData.sample) return;
+
+    // Scale the position to the sample's length
+    // TODO: Verify this doesn't cause any issues
+    auto index = static_cast<int>(position * clipData.sample->length);
+    clipData.sampleIndex = index;
+}
+/* -------------------------------------------------------------------------- */
 bool IsClipPlaying(Clip clip)
 {
+    // Ensure that the clip is valid
+    if (!clip) return false;
+
     // Get the clip data from the pool and return the state
     ClipData& clipData = gData->clipData[clip];
     return clipData.state == ClipState::Playing;
